@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+
 	"github.com/openshift/assisted-image-service/pkg/isoeditor"
 )
 
