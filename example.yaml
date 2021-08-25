@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysecret
+  namespace: insta-cow
+data:
+  network: YmFyCg==
+---
+apiVersion: metal3.io/v1alpha1
+kind: PreprovisioningImage
+metadata:
+  name: host-it-34
+  namespace: insta-cow
+spec:
+  networkDataName: mysecret
