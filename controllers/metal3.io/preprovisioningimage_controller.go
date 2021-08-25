@@ -105,7 +105,7 @@ func (r *PreprovisioningImageReconciler) update(img *metal3.PreprovisioningImage
 			return setError(generation, &img.Status, reasonConfigurationError, err.Error()), nil
 		}
 
-		url, err := r.ImageFileServer.ServerImage(img.Name, netData)
+		url, err := r.ImageFileServer.ServerImage(img.Name+".qcow", netData)
 		if err != nil {
 			log.Info("no suitable image URL available", "preferredFormat", format)
 			return setError(generation, &img.Status, reasonConfigurationError, err.Error()), nil
@@ -146,7 +146,7 @@ func getErrorRetryDelay(status metal3.PreprovisioningImageStatus) time.Duration 
 
 func gatherNetworkData(secret *corev1.Secret) ([]byte, error) {
 	// TODO not yet sure what to do here..
-	return secret.Data["haven't a clue"], nil
+	return secret.Data["network"], nil
 }
 
 func getNetworkDataSecret(secretManager secretutils.SecretManager, img *metal3.PreprovisioningImage) (*corev1.Secret, error) {

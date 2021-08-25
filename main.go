@@ -74,6 +74,7 @@ func setupChecks(mgr ctrl.Manager) {
 func main() {
 	var watchNamespace string
 	var devLogging bool
+	port := "8080"
 
 	// From CAPI point of view, BMO should be able to watch all namespaces
 	// in case of a deployment that is not multi-tenant. If the deployment
@@ -94,13 +95,13 @@ func main() {
 	}
 
 	//TODO what's the base address to publish?
-	imageServer := imagehandler.NewImageFileServer(ctrl.Log.WithName("ImageFileServer"), iso, "http://localhost:8080")
+	imageServer := imagehandler.NewImageFileServer(ctrl.Log.WithName("ImageFileServer"), iso, "http://localhost:"+port)
 	// why use a FileServer?
 	// 1. it streams files efficiently
 	// 2. if we cache these images, then that will be an easy change.
 	http.Handle("/", http.FileServer(imageServer.FileSystem()))
 	go func() {
-		log.Fatal(http.ListenAndServe(":8080", nil))
+		log.Fatal(http.ListenAndServe(":"+port, nil))
 	}()
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{

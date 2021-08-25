@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"path"
 	"sync"
 	"time"
@@ -53,8 +54,12 @@ func (f *imageFileSystem) ServerImage(name string, ignitionContent []byte) (stri
 		name:            name,
 		ignitionContent: ignitionContent,
 	})
-
-	return path.Join(f.baseURL, name), nil
+	u, err := url.Parse(f.baseURL)
+	if err != nil {
+		return "", err
+	}
+	u.Path = name
+	return u.String(), nil
 }
 
 func (f *imageFileSystem) imageFileByName(name string) *imageFile {
