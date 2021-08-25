@@ -4,6 +4,7 @@ go 1.16
 
 require (
 	github.com/go-logr/logr v0.4.0
+	github.com/golangci/golangci-lint v1.32.0
 	github.com/metal3-io/baremetal-operator v0.0.0-00010101000000-000000000000
 	github.com/metal3-io/baremetal-operator/apis v0.0.0
 	github.com/openshift/assisted-image-service v0.0.0-20210825003515-8675374a2fc2

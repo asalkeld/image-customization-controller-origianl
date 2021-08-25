@@ -39,9 +39,8 @@ import (
 )
 
 var (
-	scheme     = k8sruntime.NewScheme()
-	setupLog   = ctrl.Log.WithName("setup")
-	healthAddr string
+	scheme   = k8sruntime.NewScheme()
+	setupLog = ctrl.Log.WithName("setup")
 )
 
 func init() {

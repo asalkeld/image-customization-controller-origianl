@@ -1,0 +1,33 @@
+run:
+  timeout: "5m"
+
+linters:
+  disable-all: true
+  enable: [
+    "govet",
+    "goimports",
+    "gofmt",
+    "gosec",
+    "staticcheck",
+    "deadcode",
+    "dupl",
+    "errcheck",
+    "structcheck",
+    "unused",
+    "varcheck",
+    "whitespace",
+    "unconvert",
+    "ineffassign",
+    "nakedret",
+    "nestif",
+  ]
+
+linters-settings:
+  goimports:
+    local-prefixes: github.com/openshift,github.com/metal3-io,github.com/asalkeld/image-customization-controller
+  govet:
+    check-shadowing: false
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

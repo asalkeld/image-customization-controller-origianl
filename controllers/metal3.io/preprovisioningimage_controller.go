@@ -179,7 +179,6 @@ func setCondition(generation int64, status *metal3.PreprovisioningImageStatus,
 func setImage(generation int64, status *metal3.PreprovisioningImageStatus, url string,
 	format metal3.ImageFormat, networkData metal3.SecretStatus, arch string,
 	message string) bool {
-
 	newStatus := status.DeepCopy()
 	newStatus.ImageUrl = url
 	newStatus.Format = format
