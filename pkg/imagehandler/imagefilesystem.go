@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"sync"
 	"time"
@@ -26,7 +27,7 @@ type imageFileSystem struct {
 
 type ImageFileServer interface {
 	FileSystem() http.FileSystem
-	ServerImage(name string, ignitionContent []byte) (string, error)
+	ServeImage(name string, ignitionContent []byte) (string, error)
 }
 
 var _ ImageFileServer = &imageFileSystem{}
@@ -48,11 +49,17 @@ func (f *imageFileSystem) FileSystem() http.FileSystem {
 	return f
 }
 
-func (f *imageFileSystem) ServerImage(name string, ignitionContent []byte) (string, error) {
+func (f *imageFileSystem) ServeImage(name string, ignitionContent []byte) (string, error) {
+	fi, err := os.Stat(f.isoFile)
+	if err != nil {
+		return "", err
+	}
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.images = append(f.images, &imageFile{
 		name:            name,
+		size:            fi.Size(),
 		ignitionContent: ignitionContent,
 	})
 	u, err := url.Parse(f.baseURL)

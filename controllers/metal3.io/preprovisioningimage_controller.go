@@ -73,11 +73,10 @@ func (r *PreprovisioningImageReconciler) Reconcile(ctx context.Context, req ctrl
 			log.Info("PreprovisioningImage not found")
 			err = nil
 		}
-		return ctrl.Result{}, err
+		return result, err
 	}
 
 	changed, err := r.update(&img, log)
-
 	if k8serrors.IsNotFound(err) {
 		delay := getErrorRetryDelay(img.Status)
 		log.Info("requeuing to check for secret", "after", delay)
@@ -97,7 +96,7 @@ func (r *PreprovisioningImageReconciler) update(img *metal3.PreprovisioningImage
 	secretManager := secretutils.NewSecretManager(log, r.Client, r.APIReader)
 	secret, err := getNetworkDataSecret(secretManager, img)
 	if err == nil {
-		format := metal3.ImageFormatISO
+		format := metal3.ImageFormatISO // TODO shouldn't this be qcow?
 
 		netData, err := gatherNetworkData(secret)
 		if err != nil {
@@ -105,7 +104,7 @@ func (r *PreprovisioningImageReconciler) update(img *metal3.PreprovisioningImage
 			return setError(generation, &img.Status, reasonConfigurationError, err.Error()), nil
 		}
 
-		url, err := r.ImageFileServer.ServerImage(img.Name+".qcow", netData)
+		url, err := r.ImageFileServer.ServeImage(img.Name+".qcow", netData)
 		if err != nil {
 			log.Info("no suitable image URL available", "preferredFormat", format)
 			return setError(generation, &img.Status, reasonConfigurationError, err.Error()), nil
