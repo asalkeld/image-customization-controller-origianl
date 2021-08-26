@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -55,6 +56,8 @@ const (
 	reasonSuccess            conditionReason = "ImageSuccess"
 	reasonConfigurationError conditionReason = "ConfigurationError"
 	reasonMissingNetworkData conditionReason = "MissingNetworkData"
+	reasonUnexpectedError    conditionReason = "UnexpectedError"
+	reasonImageServingError  conditionReason = "ImageServingError"
 )
 
 // +kubebuilder:rbac:groups=metal3.io,resources=preprovisioningimages,verbs=get;list;watch;update;patch
@@ -62,7 +65,7 @@ const (
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;update
 
 func (r *PreprovisioningImageReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Log.WithValues("preprovisioningimage", req.NamespacedName)
+	log := ctrl.LoggerFrom(ctx)
 
 	result := ctrl.Result{}
 
@@ -76,7 +79,7 @@ func (r *PreprovisioningImageReconciler) Reconcile(ctx context.Context, req ctrl
 		return result, err
 	}
 
-	changed, err := r.update(&img, log)
+	changed, err := r.reconcile(ctx, &img)
 	if k8serrors.IsNotFound(err) {
 		delay := getErrorRetryDelay(img.Status)
 		log.Info("requeuing to check for secret", "after", delay)
@@ -90,42 +93,40 @@ func (r *PreprovisioningImageReconciler) Reconcile(ctx context.Context, req ctrl
 	return result, err
 }
 
-func (r *PreprovisioningImageReconciler) update(img *metal3.PreprovisioningImage, log logr.Logger) (bool, error) {
+func (r *PreprovisioningImageReconciler) reconcile(ctx context.Context, img *metal3.PreprovisioningImage) (bool, error) {
+	log := ctrl.LoggerFrom(ctx)
 	generation := img.GetGeneration()
 
 	secretManager := secretutils.NewSecretManager(log, r.Client, r.APIReader)
 	secret, err := getNetworkDataSecret(secretManager, img)
-	if err == nil {
-		format := metal3.ImageFormatISO // TODO shouldn't this be qcow?
-
-		netData, err := gatherNetworkData(secret)
-		if err != nil {
-			log.Info("no suitable network data found", "secret", secret.Name)
-			return setError(generation, &img.Status, reasonConfigurationError, err.Error()), nil
-		}
-
-		url, err := r.ImageFileServer.ServeImage(img.Name+".qcow", netData)
-		if err != nil {
-			log.Info("no suitable image URL available", "preferredFormat", format)
-			return setError(generation, &img.Status, reasonConfigurationError, err.Error()), nil
-		}
-
-		log.Info("image URL available", "url", url, "format", format)
-
-		return setImage(generation, &img.Status, url, format,
-			metal3.SecretStatus{
-				Name:    secret.Name,
-				Version: secret.GetResourceVersion(),
-			}, img.Spec.Architecture,
-			"Set default image"), nil
-	}
-
 	if k8serrors.IsNotFound(err) {
-		log.Info("network data Secret does not exist")
-		return setError(generation, &img.Status, reasonMissingNetworkData, "NetworkData secret not found"), err
+		return setError(ctx, generation, &img.Status, reasonMissingNetworkData, "NetworkData secret not found"), err
+	}
+	if err != nil {
+		return setError(ctx, generation, &img.Status, reasonUnexpectedError, err.Error()), err
 	}
 
-	return false, err
+	netData, err := gatherNetworkData(secret)
+	if err != nil {
+		return setError(ctx, generation, &img.Status, reasonConfigurationError, err.Error()), err
+	}
+
+	format := metal3.ImageFormatISO
+	imageName := img.Name + ".qcow"
+
+	url, err := r.ImageFileServer.ServeImage(imageName, netData)
+	if err != nil {
+		return setError(ctx, generation, &img.Status, reasonImageServingError, err.Error()), err
+	}
+
+	secretStatus := metal3.SecretStatus{}
+	if secret != nil {
+		secretStatus.Name = secret.Name
+		secretStatus.Version = secret.GetResourceVersion()
+	}
+
+	log.Info("image available", "url", url, "format", format)
+	return setImage(generation, &img.Status, url, format, secretStatus, img.Spec.Architecture, "Image available"), nil
 }
 
 func getErrorRetryDelay(status metal3.PreprovisioningImageStatus) time.Duration {
@@ -144,8 +145,15 @@ func getErrorRetryDelay(status metal3.PreprovisioningImageStatus) time.Duration 
 }
 
 func gatherNetworkData(secret *corev1.Secret) ([]byte, error) {
-	// TODO not yet sure what to do here..
-	return secret.Data["network"], nil
+	if secret == nil {
+		return nil, nil
+	}
+	// TODO not yet sure what to do here, this is just something for testing.
+	netData, ok := secret.Data["network"]
+	if !ok {
+		return nil, errors.New("network data in the secret has the incorrect format")
+	}
+	return netData, nil
 }
 
 func getNetworkDataSecret(secretManager secretutils.SecretManager, img *metal3.PreprovisioningImage) (*corev1.Secret, error) {
@@ -161,20 +169,6 @@ func getNetworkDataSecret(secretManager secretutils.SecretManager, img *metal3.P
 	return secretManager.AcquireSecret(secretKey, img, false)
 }
 
-func setCondition(generation int64, status *metal3.PreprovisioningImageStatus,
-	cond metal3.ImageStatusConditionType, newStatus metav1.ConditionStatus,
-	time metav1.Time, reason conditionReason, message string) {
-	newCondition := metav1.Condition{
-		Type:               string(cond),
-		Status:             newStatus,
-		LastTransitionTime: time,
-		ObservedGeneration: generation,
-		Reason:             string(reason),
-		Message:            message,
-	}
-	meta.SetStatusCondition(&status.Conditions, newCondition)
-}
-
 func setImage(generation int64, status *metal3.PreprovisioningImageStatus, url string,
 	format metal3.ImageFormat, networkData metal3.SecretStatus, arch string,
 	message string) bool {
@@ -186,33 +180,54 @@ func setImage(generation int64, status *metal3.PreprovisioningImageStatus, url s
 	newStatus.Architecture = arch
 	newStatus.NetworkData = networkData
 
-	time := metav1.Now()
-	reason := reasonSuccess
-	setCondition(generation, newStatus,
-		metal3.ConditionImageReady, metav1.ConditionTrue,
-		time, reason, message)
-	setCondition(generation, newStatus,
-		metal3.ConditionImageError, metav1.ConditionFalse,
-		time, reason, "")
+	meta.SetStatusCondition(&status.Conditions, metav1.Condition{
+		Type:               string(metal3.ConditionImageReady),
+		Status:             metav1.ConditionTrue,
+		LastTransitionTime: metav1.Now(),
+		ObservedGeneration: generation,
+		Reason:             string(reasonSuccess),
+		Message:            message,
+	})
+	meta.SetStatusCondition(&status.Conditions, metav1.Condition{
+		Type:               string(metal3.ConditionImageError),
+		Status:             metav1.ConditionFalse,
+		LastTransitionTime: metav1.Now(),
+		ObservedGeneration: generation,
+		Reason:             string(reasonSuccess),
+		Message:            "",
+	})
 
 	changed := !apiequality.Semantic.DeepEqual(status, &newStatus)
 	*status = *newStatus
 	return changed
 }
 
-func setError(generation int64, status *metal3.PreprovisioningImageStatus, reason conditionReason, message string) bool {
+func setError(ctx context.Context, generation int64, status *metal3.PreprovisioningImageStatus, reason conditionReason, message string) bool {
+	log := ctrl.LoggerFrom(ctx)
+
 	newStatus := status.DeepCopy()
 	newStatus.ImageUrl = ""
 	newStatus.Checksum = ""
 	newStatus.ChecksumType = ""
 
-	time := metav1.Now()
-	setCondition(generation, newStatus,
-		metal3.ConditionImageReady, metav1.ConditionFalse,
-		time, reason, "")
-	setCondition(generation, newStatus,
-		metal3.ConditionImageError, metav1.ConditionTrue,
-		time, reason, message)
+	log.Info("error condition", "reason", reason, "message", message)
+
+	meta.SetStatusCondition(&status.Conditions, metav1.Condition{
+		Type:               string(metal3.ConditionImageReady),
+		Status:             metav1.ConditionFalse,
+		LastTransitionTime: metav1.Now(),
+		ObservedGeneration: generation,
+		Reason:             string(reason),
+		Message:            "",
+	})
+	meta.SetStatusCondition(&status.Conditions, metav1.Condition{
+		Type:               string(metal3.ConditionImageError),
+		Status:             metav1.ConditionFalse,
+		LastTransitionTime: metav1.Now(),
+		ObservedGeneration: generation,
+		Reason:             string(reason),
+		Message:            message,
+	})
 
 	changed := !apiequality.Semantic.DeepEqual(status, &newStatus)
 	*status = *newStatus
