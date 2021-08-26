@@ -1,5 +1,4 @@
-# quick 'n dirty walk tho'
-
+# quick walk through
 
 1. get Zane's BMO pr 936
 ```

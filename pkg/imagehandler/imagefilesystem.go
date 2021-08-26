@@ -18,11 +18,12 @@ import (
 // imageFileSystem is an http.FileSystem that creates a virtual filesystem of
 // host images. These *could* be later cached as real files.
 type imageFileSystem struct {
-	isoFile string
-	baseURL string
-	images  []*imageFile
-	mu      *sync.Mutex
-	log     logr.Logger
+	isoFile     string
+	isoFileSize int64
+	baseURL     string
+	images      []*imageFile
+	mu          *sync.Mutex
+	log         logr.Logger
 }
 
 type ImageFileServer interface {
@@ -35,11 +36,12 @@ var _ http.FileSystem = &imageFileSystem{}
 
 func NewImageFileServer(logger logr.Logger, isoFile, baseURL string) ImageFileServer {
 	return &imageFileSystem{
-		log:     logger,
-		isoFile: isoFile,
-		baseURL: baseURL,
-		images:  []*imageFile{},
-		mu:      &sync.Mutex{},
+		log:         logger,
+		isoFile:     isoFile,
+		isoFileSize: 0,
+		baseURL:     baseURL,
+		images:      []*imageFile{},
+		mu:          &sync.Mutex{},
 	}
 }
 
@@ -50,16 +52,19 @@ func (f *imageFileSystem) FileSystem() http.FileSystem {
 }
 
 func (f *imageFileSystem) ServeImage(name string, ignitionContent []byte) (string, error) {
-	fi, err := os.Stat(f.isoFile)
-	if err != nil {
-		return "", err
+	if f.isoFileSize == 0 {
+		fi, err := os.Stat(f.isoFile)
+		if err != nil {
+			return "", err
+		}
+		f.isoFileSize = fi.Size()
 	}
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.images = append(f.images, &imageFile{
 		name:            name,
-		size:            fi.Size(),
+		size:            f.isoFileSize,
 		ignitionContent: ignitionContent,
 	})
 	u, err := url.Parse(f.baseURL)
@@ -105,11 +110,13 @@ func (f *imageFileSystem) Open(name string) (http.File, error) {
 	if im == nil {
 		return nil, fs.ErrNotExist
 	}
-	var err error
-	im.rhcosStreamReader, err = isoeditor.NewRHCOSStreamReader(f.isoFile, im.ignitionContent)
-	if err != nil {
-		f.log.Error(err, "creating isoeditor.NewRHCOSStreamReader")
-		return nil, err
+	if im.rhcosStreamReader == nil {
+		var err error
+		im.rhcosStreamReader, err = isoeditor.NewRHCOSStreamReader(f.isoFile, im.ignitionContent)
+		if err != nil {
+			f.log.Error(err, "creating isoeditor.NewRHCOSStreamReader")
+			return nil, err
+		}
 	}
 	return im, nil
 }
